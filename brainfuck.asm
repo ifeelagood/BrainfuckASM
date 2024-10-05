@@ -36,7 +36,7 @@ brainfuck_asm PROC
 
     mov rsi,rcx ; rcx first param
     mov rdi,rdx ; rdx second param
-    mov r10, QWORD PTR [rsp + 40]
+    mov r10,rax
     mov r11, QWORD PTR [rsp + 48]
     mov r12, QWORD PTR [rsp + 56]
      
@@ -109,7 +109,6 @@ instr_dec:
 
 instr_write:
     mov al, BYTE PTR [rdx+rdi]
-
     mov BYTE PTR [r10], al ; move from memory cell to output
     inc r10 ; increment buffer
 
@@ -131,9 +130,9 @@ instr_jz:
     ; at [, if cell is zero, then jump to corresponding ]
 
     
-    mov r12,0
-    mov al, BYTE PTR [rdx+rdi]
-    test al,al
+    ;mov r12,0
+    mov al, BYTE PTR [rdx+rdi] ; get byte from memory
+    test al,al  
     jz forward  ; jump to corresponding ]
 
     ; move current pc onto stack
@@ -182,8 +181,9 @@ backward:
     ; pop from the stack
     cmp rbx,0
     jbe stack_underflow
-    mov rcx,QWORD PTR [r11+rbx*8] ; pc <- top of stack
-    dec rbx
+    lea rax, QWORD PTR [r11+rbx*8-8] ; pc <- top of stack
+    mov rcx, [rax]
+    ; dec rbx
 
     ; rcx is now at corresponding [
     ; still need to increment
@@ -195,7 +195,11 @@ exit_success:
     xor rax,rax
 
 epilogue:
-    ; sneaky null terminator 
+    ; sneaky null terminator onto out buffer
+    mov rcx,rax
+    lea rax, [r10]
+    mov BYTE PTR [rax], 0
+    mov rax,rcx
     ; mov BYTE PTR [r10], 0
 
     ; epilogue actually starts here...

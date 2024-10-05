@@ -18,6 +18,9 @@
     <ClCompile Include="BrainfuckASM.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="InterpreterMemory.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <MASM Include="brainfuck.asm">
@@ -29,6 +32,9 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="BrainfuckASM.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="InterpreterMemory.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>
