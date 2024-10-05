@@ -1,52 +1,56 @@
-; int brainfuck_asm(const char* program, uint8_t* mem,  unsigned mem_size, const char* input, char* output)
-;                                    rcx           rdx                 r8                 r9         stack
+; int brainfuck_asm(const char* program, uint8_t* mem,  size_t mem_size, const char* input, char* output, size_t* stack,  size_t* stack_size)
+;                                    rcx           rdx                 r8                 r9      rsp+40        rsp+48               rsp+56
 
 ; registers:
-; rax   accumulator
-; rsi   const char* program
-; rdi   uint8_t* mem
-; rcx   pc
-; rdx   ptr
-; r9    const char* input
-; r10   char* output
-; r11   output_size
 
+; rsi           char*           program     string containing the program
+; rdi           uint8_t*        memory      interpreter memory
+; rax           *
+; rbx           size_t          sp          stack pointer
+; rcx           size_t          pc          program counter, index into 
+; rdx           size_t          ptr         memory address pointer
+; r8            size_t          mem_size    size of memory array
+; r9            const char*     input       input buffer
+; r10<-rsp+40   char*           output      buffer for program output
+; r11     +48   size_t*         stack       stack
+; r12     +56   size_t          stack_size  size allocated on stack
+; r13                           temp
 
-; exit codes:
-; 0: end of program (success)
-; 1: unknown instruction
-; 2: memory out of bounds
-; 3: ran out of input
-; 4: stack overflow
-; 5: stack underflow (unmatched )
 
 .code
 PUBLIC brainfuck_asm
 
 brainfuck_asm PROC
-    ; pop output pointer from stack
-    pop r10 ; char* output
-    
-    push rsi ; rdi and rsi are non volatile
-    push rdi
-
     ; prologue
     push rbp
     mov rbp,rsp
- 
-    mov rsi,rcx ; const char* program
-    mov rdi,rdx ; uint8_t* mem
-    
-    mov rbx,0 ; sp
-    mov rcx,0 ; program counter
-    mov rdx,0 ; memory address pointer
+
+    ; https://learn.microsoft.com/en-us/cpp/build/x64-software-conventions?view=msvc-170#register-volatility-and-preservation
+    ; push rbx,rsi,rdi,r12,r13,r14
+    push rbx
+    push rsi
+    push rdi
+    push r12
+    push r13
+    push r14
+
+    mov rsi,rcx ; rcx first param
+    mov rdi,rdx ; rdx second param
+    mov r10, QWORD PTR [rsp + 40]
+    mov r11, QWORD PTR [rsp + 48]
+    mov r12, QWORD PTR [rsp + 56]
+     
+
+    mov rcx,0 ; pc = 0
+    mov rbx,0 ; sp = 0
+    mov rdx,0 ; memptr = 0
 
 decode_instruction:    
     mov al,BYTE PTR [rcx+rsi] 
 
-    cmp al,'<'
-    je instr_movr
     cmp al,'>'
+    je instr_movr
+    cmp al,'<'
     je instr_movl
     cmp al, '+'
     je instr_inc
@@ -104,7 +108,9 @@ instr_dec:
     jmp increment_pc
 
 instr_write:
-    mov BYTE PTR [r10], BYTE PTR [rdx+rdi] ; move from memory cell to output
+    mov al, BYTE PTR [rdx+rdi]
+
+    mov BYTE PTR [r10], al ; move from memory cell to output
     inc r10 ; increment buffer
 
     jmp increment_pc
@@ -124,51 +130,101 @@ instr_read:
 instr_jz:
     ; at [, if cell is zero, then jump to corresponding ]
 
+    
+    mov r12,0
+    mov al, BYTE PTR [rdx+rdi]
+    test al,al
+    jz forward  ; jump to corresponding ]
+
     ; move current pc onto stack
-    cmp rbx,stack_size
+    cmp rbx,r12 ; r12 = stack_size
     jae stack_overflow 
-    mov DWORD PTR [stack+rbx*4], rcx 
+    mov QWORD PTR [r11+rbx*8], rcx 
     inc rbx
-
-    ; jump to corresponding ]
-    test BYTE PTR [rdx+rdi], BYTE PTR [rdx+rdi]
-    jz forward
-
 
     jmp increment_pc
 
 forward:
-    inc rcx 
+    inc rcx
     mov al, BYTE PTR [rcx+rsi]
+    ; edge case: stack is not empty & out of program -> unmatched bracket
+    test al,al
+    jz unmatched_bracket
+
     cmp al,']'
-    je forward_pop
-    cmp al '[' 
-    je foward_push
+    je dec_nesting
+    cmp al,'[' 
+    je inc_nesting
 
+    jmp forward
 
-forward_pop:
-    cmp rbx,0
-    jl stack_underflow
-    mov DWORD PTR [stack+rbx*4], rcx 
-    inc rbx
+inc_nesting:
+    inc r12
+    jmp forward
 
-forward_push:
-    cmp rbx,stack_size
-    jae stack_overflow 
-    mov DWORD PTR [stack+rbx*4], rcx 
-    inc rbx
-
-forward_done:
-    test rbx,rbx
-    jnz forward
-
-    jmp decode_instruction
-
-instr_jnz:
-    ; at ], if the cell is not zero, then jump to corresponding [
+dec_nesting:
+    dec r12
+    cmp r12,0
+    jne forward
+    ; found matching ]
     jmp increment_pc
 
 
+instr_jnz:
+    ; at ], if cell is not zero, jump back to corresponding [
+    mov al, BYTE PTR [rdx+rdi]
+    test al,al
+    jnz backward
+
+    jmp increment_pc
+
+backward:
+    ; pop from the stack
+    cmp rbx,0
+    jbe stack_underflow
+    mov rcx,QWORD PTR [r11+rbx*8] ; pc <- top of stack
+    dec rbx
+
+    ; rcx is now at corresponding [
+    ; still need to increment
+    jmp increment_pc
+
+
+
+exit_success:
+    xor rax,rax
+
+epilogue:
+    ; sneaky null terminator 
+    ; mov BYTE PTR [r10], 0
+
+    ; epilogue actually starts here...
+
+    ; restore non volatiles
+    ; pop reverse: r14, r13, r12, rdi, rsi, rbx
+
+
+    pop r14
+    pop r13
+    pop r12
+    pop rdi 
+    pop rsi
+    pop rbx
+    
+    mov rsp,rbp
+    pop rbp
+
+    ret
+
+
+; exit codes:
+; 0: end of program (success)
+; 1: unknown instruction
+; 2: memory out of bounds
+; 3: ran out of input
+; 4: stack overflow
+; 5: stack underflow (unmatched )
+; 6: unmatched bracket
 
 
 out_of_input:
@@ -177,21 +233,15 @@ out_of_input:
 
 stack_overflow:
     mov rax,4
-    jmp epilogue:
+    jmp epilogue
 
-exit_success:
-    xor rax,rax
+stack_underflow:
+    mov rax,5
+    jmp epilogue
 
-epilogue:
-    ; sneaky null terminator 
-    mov BYTE PTR [r10], 0
-
-    ; epilogue actually starts here...
-    mov rsp,rbp
-    pop rbp
-    pop rdi ; rdi and rsi are non volatile
-    pop rsi
-    ret
+unmatched_bracket:
+    mov rax,6
+    jmp epilogue
 
 brainfuck_asm ENDP
 
@@ -199,7 +249,6 @@ brainfuck_asm ENDP
 
 
 .data
-    stack_size  DWORD   8192
-    stack       DWORD   stack_size  DUP(?)
+    HEAP_ZERO_MEMORY    DWORD   00000008
 
 END
